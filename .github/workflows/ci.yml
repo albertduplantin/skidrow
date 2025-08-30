@@ -1,0 +1,95 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+        
+      - name: Configuration de Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Installation des dépendances
+        run: npm ci
+        
+      - name: Vérification des types TypeScript
+        run: npm run type-check
+        
+      - name: Linting avec ESLint
+        run: npm run lint
+        
+      - name: Tests unitaires avec Vitest
+        run: npm run test
+        
+      - name: Tests e2e avec Playwright
+        run: npm run test:e2e
+        
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+        
+      - name: Configuration de Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Installation des dépendances
+        run: npm ci
+        
+      - name: Build de l'application
+        run: npm run build
+        
+      - name: Upload des artefacts de build
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-files
+          path: .next/
+          
+  deploy-preview:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+        
+      - name: Configuration de Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Installation des dépendances
+        run: npm ci
+        
+      - name: Build de l'application
+        run: npm run build
+        
+      - name: Comment PR avec le statut
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ Build réussi pour cette PR!'
+            })

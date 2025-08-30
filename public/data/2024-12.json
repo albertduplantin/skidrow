@@ -1,0 +1,43 @@
+{
+  "month": "2024-12",
+  "games": [
+    {
+      "name": "Cyberpunk 2077 Phantom Liberty",
+      "skidrowUrl": "https://www.skidrowreloaded.com/cyberpunk-2077-phantom-liberty/",
+      "releaseDate": "2024-12-15",
+      "rating": 92,
+      "metacriticScore": 89,
+      "steamLink": "https://store.steampowered.com/app/2136330",
+      "igdbId": 12345,
+      "rawgId": 67890,
+      "openCriticScore": 88,
+      "lastUpdated": "2024-12-20T10:00:00.000Z"
+    },
+    {
+      "name": "Baldur's Gate 3 Definitive Edition",
+      "skidrowUrl": "https://www.skidrowreloaded.com/baldurs-gate-3-definitive-edition/",
+      "releaseDate": "2024-12-10",
+      "rating": 95,
+      "metacriticScore": 96,
+      "steamLink": "https://store.steampowered.com/app/1086940",
+      "igdbId": 23456,
+      "rawgId": 78901,
+      "openCriticScore": 94,
+      "lastUpdated": "2024-12-20T10:00:00.000Z"
+    },
+    {
+      "name": "Alan Wake 2 Remastered",
+      "skidrowUrl": "https://www.skidrowreloaded.com/alan-wake-2-remastered/",
+      "releaseDate": "2024-12-05",
+      "rating": 88,
+      "metacriticScore": 87,
+      "steamLink": "https://store.steampowered.com/app/1234567",
+      "igdbId": 34567,
+      "rawgId": 89012,
+      "openCriticScore": 86,
+      "lastUpdated": "2024-12-20T10:00:00.000Z"
+    }
+  ],
+  "totalCount": 3,
+  "lastUpdated": "2024-12-20T10:00:00.000Z"
+}
