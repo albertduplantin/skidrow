@@ -22,7 +22,10 @@ jobs:
           
       - name: Installation des dépendances
         run: npm ci
-        
+
+      - name: Installation de Chromium (Playwright)
+        run: npx playwright install chromium --with-deps
+
       - name: Configuration des variables d'environnement
         env:
           RAWG_API_KEY: ${{ secrets.RAWG_API_KEY }}
@@ -52,3 +55,5 @@ jobs:
           git config --local user.name "GitHub Action"
           git add public/data/
           git diff --quiet && git diff --staged --quiet || (git commit -m "📊 Mise à jour des données - $(date -u +'%Y-%m-%d')" && git push)
+
+

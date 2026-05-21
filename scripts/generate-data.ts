@@ -1,273 +1,296 @@
 import * as cheerio from 'cheerio';
-import axios from 'axios';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
-import retry from 'retry';
-import { Game, GameSchema, MonthlyGames, MonthlyGamesSchema } from '../src/types/game';
+import { chromium } from 'playwright';
+import { Game, MonthlyGames, MonthlyGamesSchema } from '../src/types/game';
 import { RawgDriver } from '../src/drivers/rawg-driver';
 import { IgdbDriver } from '../src/drivers/igdb-driver';
 import { OpenCriticDriver } from '../src/drivers/opencritic-driver';
 
-// Configuration
 const SKIDROW_BASE_URL = 'https://www.skidrowreloaded.com';
-const MIN_RATING = 80; // Note minimale pour filtrer les jeux
-const MAX_PAGES = 50; // Limite de pages pour éviter les boucles infinies
+const MIN_RATING = 80;
+const MAX_PAGES = 50;
 
-// Fonction utilitaire pour retry avec exponential backoff
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  maxAttempts: number = 3
-): Promise<T> {
-  const operation = retry.operation({
-    retries: maxAttempts,
-    factor: 2,
-    minTimeout: 1000,
-    maxTimeout: 10000,
-  });
-
-  return new Promise((resolve, reject) => {
-    operation.attempt(async (currentAttempt) => {
-      try {
-        const result = await fn();
-        resolve(result);
-      } catch (error) {
-        console.log(`Tentative ${currentAttempt} échouée:`, error);
-        if (operation.retry(error as Error)) {
-          return;
-        }
-        reject(operation.mainError());
-      }
-    });
-  });
-}
-
-// Fonction pour nettoyer le nom du jeu
 function cleanGameName(name: string): string {
   return name
-    .replace(/\[.*?\]/g, '') // Supprimer les crochets et leur contenu
-    .replace(/\(.*?\)/g, '') // Supprimer les parenthèses et leur contenu
-    .replace(/\./g, ' ') // Remplacer les points par des espaces
-    .replace(/\s+/g, ' ') // Normaliser les espaces
+    .replace(/\[.*?\]/g, '')
+    .replace(/\(.*?\)/g, '')
+    .replace(/\./g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
-// Fonction pour vérifier si une date est dans le mois dernier
-function isLastMonth(dateStr: string): boolean {
+// Accepte le mois courant ET le mois précédent
+function isRecentEnough(dateStr: string): boolean {
   const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return false;
   const now = new Date();
-  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  
-  return date >= lastMonth && date < thisMonth;
+  const twoMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return date >= twoMonthsAgo;
 }
 
-// Fonction pour scraper une page de Skidrow
-async function scrapeSkidrowPage(pageUrl: string): Promise<Game[]> {
-  try {
-    const response = await withRetry(() => 
-      axios.get(pageUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-      })
-    );
+// Indique si une date est trop ancienne pour continuer le scraping
+function isTooOld(dateStr: string): boolean {
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return false;
+  const now = new Date();
+  const twoMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return date < twoMonthsAgo;
+}
 
-    const $ = cheerio.load(response.data);
-    const games: Game[] = [];
+function parseDate(raw: string): string | null {
+  const cleaned = raw.trim();
+  // datetime attribute (ISO)
+  const isoMatch = cleaned.match(/\d{4}-\d{2}-\d{2}/);
+  if (isoMatch) return isoMatch[0];
+  // "January 15, 2026" or "Jan 15, 2026"
+  const d = new Date(cleaned);
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  return null;
+}
 
-    // Sélecteur pour les jeux (à adapter selon la structure du site)
-    $('.post').each((_, element) => {
-      const $element = $(element);
-      const titleElement = $element.find('.title a');
-      const title = titleElement.text().trim();
-      const url = titleElement.attr('href');
-      const dateElement = $element.find('.date');
-      const dateStr = dateElement.text().trim();
+function extractGames($: cheerio.CheerioAPI): Array<{ name: string; url: string; dateStr: string }> {
+  const results: Array<{ name: string; url: string; dateStr: string }> = [];
+
+  // Stratégies par ordre de priorité pour trouver les posts
+  const postSelectors = ['article', '.post', '.entry', '.item'];
+  const titleSelectors = ['.entry-title a', 'h2.title a', '.post-title a', 'h2 a', 'h1 a', '.title a'];
+  const dateSelectors = ['time[datetime]', '.entry-date', '.post-date', '.date', 'time', '.published'];
+
+  for (const postSel of postSelectors) {
+    const posts = $(postSel);
+    if (posts.length === 0) continue;
+
+    posts.each((_, el) => {
+      const $el = $(el);
+
+      let title = '';
+      let url = '';
+      for (const sel of titleSelectors) {
+        const found = $el.find(sel).first();
+        if (found.length) {
+          title = found.text().trim();
+          url = found.attr('href') || '';
+          if (title && url) break;
+        }
+      }
+
+      let dateStr = '';
+      for (const sel of dateSelectors) {
+        const found = $el.find(sel).first();
+        if (found.length) {
+          const raw = found.attr('datetime') || found.text();
+          const parsed = parseDate(raw);
+          if (parsed) { dateStr = parsed; break; }
+        }
+      }
 
       if (title && url && dateStr) {
-        const cleanTitle = cleanGameName(title);
-        const game: Game = {
-          name: cleanTitle,
-          skidrowUrl: url.startsWith('http') ? url : `${SKIDROW_BASE_URL}${url}`,
-          lastUpdated: new Date().toISOString(),
-        };
-
-        // Vérifier si la date est dans le mois dernier
-        if (isLastMonth(dateStr)) {
-          games.push(game);
-        }
+        results.push({
+          name: cleanGameName(title),
+          url: url.startsWith('http') ? url : `${SKIDROW_BASE_URL}${url}`,
+          dateStr,
+        });
       }
     });
 
-    return games;
-  } catch (error) {
-    console.error(`Erreur lors du scraping de ${pageUrl}:`, error);
-    return [];
+    if (results.length > 0) break;
   }
+
+  return results;
 }
 
-// Fonction pour enrichir un jeu avec les données des APIs
-async function enrichGame(game: Game, drivers: {
-  rawg: RawgDriver;
-  igdb: IgdbDriver;
-  openCritic: OpenCriticDriver;
-}): Promise<Game> {
-  console.log(`Enrichissement de: ${game.name}`);
+async function scrapeAllPages(): Promise<Game[]> {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    extraHTTPHeaders: {
+      'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+    },
+  });
+
+  const allGames: Game[] = [];
 
   try {
-    // Récupérer les données en parallèle
-    const [rawgRating, rawgSteam, rawgDate, igdbRating, igdbSteam, igdbDate, openCriticRating, openCriticSteam, openCriticDate] = await Promise.allSettled([
-      drivers.rawg.getRating(game.name),
-      drivers.rawg.getSteamLink(game.name),
-      drivers.rawg.getReleaseDate(game.name),
-      drivers.igdb.getRating(game.name),
-      drivers.igdb.getSteamLink(game.name),
-      drivers.igdb.getReleaseDate(game.name),
-      drivers.openCritic.getRating(game.name),
-      drivers.openCritic.getSteamLink(game.name),
-      drivers.openCritic.getReleaseDate(game.name),
-    ]);
+    const page = await context.newPage();
 
-    // Appliquer les données récupérées
-    if (rawgRating.status === 'fulfilled' && rawgRating.value) {
-      game.rating = rawgRating.value;
-    }
-    if (rawgSteam.status === 'fulfilled' && rawgSteam.value) {
-      game.steamLink = rawgSteam.value;
-    }
-    if (rawgDate.status === 'fulfilled' && rawgDate.value) {
-      game.releaseDate = rawgDate.value;
-    }
-    if (igdbRating.status === 'fulfilled' && igdbRating.value) {
-      game.rating = game.rating || igdbRating.value;
-    }
-    if (igdbSteam.status === 'fulfilled' && igdbSteam.value) {
-      game.steamLink = game.steamLink || igdbSteam.value;
-    }
-    if (igdbDate.status === 'fulfilled' && igdbDate.value) {
-      game.releaseDate = game.releaseDate || igdbDate.value;
-    }
-    if (openCriticRating.status === 'fulfilled' && openCriticRating.value) {
-      game.rating = game.rating || openCriticRating.value;
-    }
-    if (openCriticSteam.status === 'fulfilled' && openCriticSteam.value) {
-      game.steamLink = game.steamLink || openCriticSteam.value;
-    }
-    if (openCriticDate.status === 'fulfilled' && openCriticDate.value) {
-      game.releaseDate = game.releaseDate || openCriticDate.value;
-    }
+    for (let currentPage = 1; currentPage <= MAX_PAGES; currentPage++) {
+      const url = currentPage === 1
+        ? SKIDROW_BASE_URL
+        : `${SKIDROW_BASE_URL}/page/${currentPage}`;
 
-    // Calculer la note moyenne si plusieurs sources
-    const ratings = [game.rating].filter(Boolean) as number[];
-    if (ratings.length > 1) {
-      game.rating = Math.round(ratings.reduce((a, b) => a + b, 0) / ratings.length);
-    }
+      console.log(`📄 Page ${currentPage}: ${url}`);
 
-    game.lastUpdated = new Date().toISOString();
-  } catch (error) {
-    console.error(`Erreur lors de l'enrichissement de ${game.name}:`, error);
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.waitForTimeout(1500);
+      } catch (err) {
+        console.error(`Erreur navigation page ${currentPage}:`, err);
+        break;
+      }
+
+      const html = await page.content();
+      const $ = cheerio.load(html);
+      const entries = extractGames($);
+
+      if (entries.length === 0) {
+        console.log(`Aucun jeu trouvé sur la page ${currentPage}, arrêt.`);
+        break;
+      }
+
+      let foundOld = false;
+      for (const entry of entries) {
+        if (isTooOld(entry.dateStr)) {
+          foundOld = true;
+          continue;
+        }
+        if (isRecentEnough(entry.dateStr)) {
+          allGames.push({
+            name: entry.name,
+            skidrowUrl: entry.url,
+            lastUpdated: new Date().toISOString(),
+          });
+        }
+      }
+
+      console.log(`  → ${entries.length} entrées, ${allGames.length} jeux récents au total`);
+
+      if (foundOld && allGames.length > 0) {
+        console.log('Dates trop anciennes détectées, arrêt du scraping.');
+        break;
+      }
+
+      await page.waitForTimeout(1000);
+    }
+  } finally {
+    await browser.close();
   }
 
+  return allGames;
+}
+
+async function enrichGame(
+  game: Game,
+  drivers: { rawg?: RawgDriver; igdb?: IgdbDriver; openCritic?: OpenCriticDriver }
+): Promise<Game> {
+  console.log(`  🔍 ${game.name}`);
+  const calls: Promise<{ type: string; value: string | number | null }>[] = [];
+
+  if (drivers.rawg) {
+    calls.push(drivers.rawg.getRating(game.name).then(v => ({ type: 'rawgRating', value: v })).catch(() => ({ type: 'rawgRating', value: null })));
+    calls.push(drivers.rawg.getSteamLink(game.name).then(v => ({ type: 'rawgSteam', value: v })).catch(() => ({ type: 'rawgSteam', value: null })));
+    calls.push(drivers.rawg.getReleaseDate(game.name).then(v => ({ type: 'rawgDate', value: v })).catch(() => ({ type: 'rawgDate', value: null })));
+  }
+  if (drivers.igdb) {
+    calls.push(drivers.igdb.getRating(game.name).then(v => ({ type: 'igdbRating', value: v })).catch(() => ({ type: 'igdbRating', value: null })));
+    calls.push(drivers.igdb.getSteamLink(game.name).then(v => ({ type: 'igdbSteam', value: v })).catch(() => ({ type: 'igdbSteam', value: null })));
+    calls.push(drivers.igdb.getReleaseDate(game.name).then(v => ({ type: 'igdbDate', value: v })).catch(() => ({ type: 'igdbDate', value: null })));
+  }
+  if (drivers.openCritic) {
+    calls.push(drivers.openCritic.getRating(game.name).then(v => ({ type: 'ocRating', value: v })).catch(() => ({ type: 'ocRating', value: null })));
+    calls.push(drivers.openCritic.getSteamLink(game.name).then(v => ({ type: 'ocSteam', value: v })).catch(() => ({ type: 'ocSteam', value: null })));
+    calls.push(drivers.openCritic.getReleaseDate(game.name).then(v => ({ type: 'ocDate', value: v })).catch(() => ({ type: 'ocDate', value: null })));
+  }
+
+  const results = await Promise.all(calls);
+  const ratings: number[] = [];
+
+  for (const r of results) {
+    if (r.value === null) continue;
+    if (r.type.endsWith('Rating') && typeof r.value === 'number') {
+      ratings.push(r.value);
+      if (!game.rating) game.rating = r.value;
+    }
+    if (r.type.endsWith('Steam') && typeof r.value === 'string' && !game.steamLink) {
+      game.steamLink = r.value;
+    }
+    if (r.type.endsWith('Date') && typeof r.value === 'string' && !game.releaseDate) {
+      game.releaseDate = r.value;
+    }
+  }
+
+  if (ratings.length > 1) {
+    game.rating = Math.round(ratings.reduce((a, b) => a + b, 0) / ratings.length);
+  }
+
+  game.lastUpdated = new Date().toISOString();
   return game;
 }
 
-// Fonction principale
 async function main() {
   console.log('🚀 Démarrage de la génération des données...');
 
-  // Vérifier les variables d'environnement
   const rawgApiKey = process.env.RAWG_API_KEY;
   const twitchClientId = process.env.TWITCH_CLIENT_ID;
   const twitchClientSecret = process.env.TWITCH_CLIENT_SECRET;
   const openCriticApiKey = process.env.OPENCRITIC_API_KEY;
 
-  if (!rawgApiKey || !twitchClientId || !twitchClientSecret) {
-    console.error('❌ Variables d\'environnement manquantes. Vérifiez RAWG_API_KEY, TWITCH_CLIENT_ID, et TWITCH_CLIENT_SECRET.');
+  const drivers: { rawg?: RawgDriver; igdb?: IgdbDriver; openCritic?: OpenCriticDriver } = {};
+
+  if (rawgApiKey) {
+    drivers.rawg = new RawgDriver(rawgApiKey);
+    console.log('✅ RAWG activé');
+  } else {
+    console.warn('⚠️  RAWG_API_KEY manquant — notes RAWG désactivées');
+  }
+  if (twitchClientId && twitchClientSecret) {
+    drivers.igdb = new IgdbDriver(twitchClientId, twitchClientSecret);
+    console.log('✅ IGDB activé');
+  } else {
+    console.warn('⚠️  TWITCH_CLIENT_ID/SECRET manquants — notes IGDB désactivées');
+  }
+  if (openCriticApiKey) {
+    drivers.openCritic = new OpenCriticDriver(openCriticApiKey);
+    console.log('✅ OpenCritic activé');
+  }
+
+  if (!drivers.rawg && !drivers.igdb && !drivers.openCritic) {
+    console.warn('⚠️  Aucun driver de notation actif — les jeux seront listés sans note');
+  }
+
+  // Scraping
+  console.log('\n🔎 Scraping de Skidrow...');
+  const games = await scrapeAllPages();
+  console.log(`\n📊 ${games.length} jeux récupérés`);
+
+  if (games.length === 0) {
+    console.error('❌ Aucun jeu trouvé. Vérifiez les sélecteurs CSS du scraper.');
     process.exit(1);
   }
 
-  // Initialiser les drivers
-  const drivers = {
-    rawg: new RawgDriver(rawgApiKey),
-    igdb: new IgdbDriver(twitchClientId, twitchClientSecret),
-    openCritic: new OpenCriticDriver(openCriticApiKey || ''),
+  // Enrichissement
+  console.log('\n🔍 Enrichissement des données...');
+  const enriched = await Promise.all(games.map(g => enrichGame(g, drivers)));
+
+  // Filtrage par note (uniquement si des drivers sont actifs)
+  const hasDrivers = Object.keys(drivers).length > 0;
+  const filtered = hasDrivers
+    ? enriched.filter(g => g.rating && g.rating >= MIN_RATING)
+    : enriched;
+
+  console.log(`\n✅ ${filtered.length} jeux${hasDrivers ? ` avec note ≥ ${MIN_RATING}` : ''}`);
+
+  const month = new Date().toISOString().slice(0, 7);
+  const monthlyGames: MonthlyGames = {
+    month,
+    games: filtered,
+    totalCount: filtered.length,
+    lastUpdated: new Date().toISOString(),
   };
 
-  try {
-    const allGames: Game[] = [];
-    let currentPage = 1;
-    let hasMorePages = true;
+  const validatedData = MonthlyGamesSchema.parse(monthlyGames);
 
-    // Scraper toutes les pages jusqu'à ce qu'on trouve des dates trop anciennes
-    while (hasMorePages && currentPage <= MAX_PAGES) {
-      console.log(`📄 Scraping de la page ${currentPage}...`);
-      
-      const pageUrl = currentPage === 1 
-        ? SKIDROW_BASE_URL 
-        : `${SKIDROW_BASE_URL}/page/${currentPage}`;
-      
-      const pageGames = await scrapeSkidrowPage(pageUrl);
-      
-      if (pageGames.length === 0) {
-        console.log(`Aucun jeu trouvé sur la page ${currentPage}, arrêt du scraping.`);
-        hasMorePages = false;
-      } else {
-        allGames.push(...pageGames);
-        console.log(`${pageGames.length} jeux trouvés sur la page ${currentPage}`);
-        currentPage++;
-        
-        // Attendre un peu entre les pages pour être respectueux
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
+  const dataDir = join(process.cwd(), 'public', 'data');
+  if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 
-    console.log(`📊 Total de jeux trouvés: ${allGames.length}`);
+  const outputPath = join(dataDir, `${month}.json`);
+  writeFileSync(outputPath, JSON.stringify(validatedData, null, 2));
 
-    // Enrichir les jeux avec les données des APIs
-    console.log('🔍 Enrichissement des données...');
-    const enrichedGames = await Promise.all(
-      allGames.map(game => enrichGame(game, drivers))
-    );
-
-    // Filtrer les jeux avec une note >= 80
-    const filteredGames = enrichedGames.filter(game => 
-      game.rating && game.rating >= MIN_RATING
-    );
-
-    console.log(`✅ Jeux avec note >= ${MIN_RATING}: ${filteredGames.length}`);
-
-    // Créer l'objet final
-    const month = new Date().toISOString().slice(0, 7); // Format YYYY-MM
-    const monthlyGames: MonthlyGames = {
-      month,
-      games: filteredGames,
-      totalCount: filteredGames.length,
-      lastUpdated: new Date().toISOString(),
-    };
-
-    // Valider avec Zod
-    const validatedData = MonthlyGamesSchema.parse(monthlyGames);
-
-    // Créer le dossier public/data s'il n'existe pas
-    const dataDir = join(process.cwd(), 'public', 'data');
-    if (!existsSync(dataDir)) {
-      mkdirSync(dataDir, { recursive: true });
-    }
-
-    // Sauvegarder le fichier JSON
-    const outputPath = join(dataDir, `${month}.json`);
-    writeFileSync(outputPath, JSON.stringify(validatedData, null, 2));
-    
-    console.log(`💾 Données sauvegardées dans ${outputPath}`);
-    console.log('🎉 Génération terminée avec succès !');
-
-  } catch (error) {
-    console.error('❌ Erreur lors de la génération:', error);
-    process.exit(1);
-  }
+  console.log(`\n💾 Données sauvegardées dans ${outputPath}`);
+  console.log('🎉 Génération terminée !');
 }
 
-// Exécuter le script
-if (require.main === module) {
-  main().catch(console.error);
-}
+main().catch(err => {
+  console.error('❌ Erreur fatale:', err);
+  process.exit(1);
+});
