@@ -1,35 +1,26 @@
 import { MonthlyGames, MonthlyGamesSchema } from '@/types/game';
 import { notFound } from 'next/navigation';
+import fs from 'fs';
+import path from 'path';
 
-// Fonction pour récupérer les données du mois actuel
-async function getCurrentMonthData(): Promise<MonthlyGames | null> {
+async function getMostRecentData(): Promise<MonthlyGames | null> {
   try {
-    const currentMonth = new Date().toISOString().slice(0, 7); // Format YYYY-MM
-    const data = await import(`../../public/data/${currentMonth}.json`);
-    
-    // Valider les données avec Zod
-    const validatedData = MonthlyGamesSchema.parse(data.default);
-    return validatedData;
-  } catch (error) {
-    console.error('Erreur lors de la récupération des données:', error);
+    const dataDir = path.join(process.cwd(), 'public/data');
+    const files = fs.readdirSync(dataDir)
+      .filter(f => /^\d{4}-\d{2}\.json$/.test(f))
+      .sort()
+      .reverse();
+
+    for (const file of files) {
+      try {
+        const content = fs.readFileSync(path.join(dataDir, file), 'utf-8');
+        return MonthlyGamesSchema.parse(JSON.parse(content));
+      } catch {
+        continue;
+      }
+    }
     return null;
-  }
-}
-
-// Fonction pour récupérer les données du mois précédent
-async function getLastMonthData(): Promise<MonthlyGames | null> {
-  try {
-    const now = new Date();
-    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const lastMonthStr = lastMonth.toISOString().slice(0, 7); // Format YYYY-MM
-    
-    const data = await import(`../../public/data/${lastMonthStr}.json`);
-    
-    // Valider les données avec Zod
-    const validatedData = MonthlyGamesSchema.parse(data.default);
-    return validatedData;
-  } catch (error) {
-    console.error('Erreur lors de la récupération des données du mois précédent:', error);
+  } catch {
     return null;
   }
 }
@@ -123,14 +114,7 @@ function StatsSection({ data }: { data: MonthlyGames }) {
 }
 
 export default async function HomePage() {
-  // Essayer de récupérer les données du mois actuel, sinon du mois précédent
-  let data = await getCurrentMonthData();
-  let monthLabel = 'ce mois';
-  
-  if (!data) {
-    data = await getLastMonthData();
-    monthLabel = 'le mois dernier';
-  }
+  const data = await getMostRecentData();
 
   if (!data) {
     notFound();
@@ -140,7 +124,7 @@ export default async function HomePage() {
     <div className="space-y-6">
       <div className="text-center">
         <h2 className="text-3xl font-bold text-gray-900 mb-2">
-          Jeux de qualité de {monthLabel}
+          Jeux de qualité — {data.month}
         </h2>
         <p className="text-lg text-gray-600">
                      Découvrez les meilleurs jeux avec une note d&apos;au moins 80/100
