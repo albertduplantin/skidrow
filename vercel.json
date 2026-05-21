@@ -4,10 +4,7 @@
   "framework": "nextjs",
   "installCommand": "npm install",
   "devCommand": "npm run dev",
-  "regions": ["cdg1"],
-  "functions": {
-    "src/app/**/*.tsx": {
-      "runtime": "edge"
-    }
-  }
+  "regions": ["cdg1"]
 }
+
+
