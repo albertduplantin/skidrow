@@ -6,6 +6,7 @@ import { Game, MonthlyGames, MonthlyGamesSchema } from '../src/types/game';
 import { RawgDriver } from '../src/drivers/rawg-driver';
 import { IgdbDriver } from '../src/drivers/igdb-driver';
 import { OpenCriticDriver } from '../src/drivers/opencritic-driver';
+import { SteamDriver } from '../src/drivers/steam-driver';
 
 const SKIDROW_BASE_URL = 'https://www.skidrowreloaded.com';
 const MIN_RATING = 80;
@@ -171,10 +172,15 @@ async function scrapeAllPages(): Promise<Game[]> {
 
 async function enrichGame(
   game: Game,
-  drivers: { rawg?: RawgDriver; igdb?: IgdbDriver; openCritic?: OpenCriticDriver }
+  drivers: { steam: SteamDriver; rawg?: RawgDriver; igdb?: IgdbDriver; openCritic?: OpenCriticDriver }
 ): Promise<Game> {
   console.log(`  🔍 ${game.name}`);
   const calls: Promise<{ type: string; value: string | number | null }>[] = [];
+
+  // Steam en premier — aucune clé requise
+  calls.push(drivers.steam.getRating(game.name).then(v => ({ type: 'steamRating', value: v })).catch(() => ({ type: 'steamRating', value: null })));
+  calls.push(drivers.steam.getSteamLink(game.name).then(v => ({ type: 'steamLink', value: v })).catch(() => ({ type: 'steamLink', value: null })));
+  calls.push(drivers.steam.getReleaseDate(game.name).then(v => ({ type: 'steamDate', value: v })).catch(() => ({ type: 'steamDate', value: null })));
 
   if (drivers.rawg) {
     calls.push(drivers.rawg.getRating(game.name).then(v => ({ type: 'rawgRating', value: v })).catch(() => ({ type: 'rawgRating', value: null })));
@@ -225,7 +231,10 @@ async function main() {
   const twitchClientSecret = process.env.TWITCH_CLIENT_SECRET;
   const openCriticApiKey = process.env.OPENCRITIC_API_KEY;
 
-  const drivers: { rawg?: RawgDriver; igdb?: IgdbDriver; openCritic?: OpenCriticDriver } = {};
+  const drivers: { steam: SteamDriver; rawg?: RawgDriver; igdb?: IgdbDriver; openCritic?: OpenCriticDriver } = {
+    steam: new SteamDriver(),
+  };
+  console.log('✅ Steam activé (Metacritic + avis utilisateurs, sans clé)');
 
   if (rawgApiKey) {
     drivers.rawg = new RawgDriver(rawgApiKey);
@@ -244,9 +253,7 @@ async function main() {
     console.log('✅ OpenCritic activé');
   }
 
-  if (!drivers.rawg && !drivers.igdb && !drivers.openCritic) {
-    console.warn('⚠️  Aucun driver de notation actif — les jeux seront listés sans note');
-  }
+  // Steam est toujours actif, pas de warning nécessaire
 
   // Scraping
   console.log('\n🔎 Scraping de Skidrow...');
@@ -262,13 +269,9 @@ async function main() {
   console.log('\n🔍 Enrichissement des données...');
   const enriched = await Promise.all(games.map(g => enrichGame(g, drivers)));
 
-  // Filtrage par note (uniquement si des drivers sont actifs)
-  const hasDrivers = Object.keys(drivers).length > 0;
-  const filtered = hasDrivers
-    ? enriched.filter(g => g.rating && g.rating >= MIN_RATING)
-    : enriched;
+  const filtered = enriched.filter(g => g.rating && g.rating >= MIN_RATING);
 
-  console.log(`\n✅ ${filtered.length} jeux${hasDrivers ? ` avec note ≥ ${MIN_RATING}` : ''}`);
+  console.log(`\n✅ ${filtered.length} jeux avec note ≥ ${MIN_RATING}`);
 
   const month = new Date().toISOString().slice(0, 7);
   const monthlyGames: MonthlyGames = {
