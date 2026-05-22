@@ -28,9 +28,9 @@ export type MonthlyGames = z.infer<typeof MonthlyGamesSchema>;
 
 // Interface pour les drivers API
 export interface ApiDriver {
-  getRating(name: string): Promise<number | undefined>;
-  getSteamLink(name: string): Promise<string | undefined>;
-  getReleaseDate(name: string): Promise<string | undefined>;
+  getRating(name: string): Promise<number | null | undefined>;
+  getSteamLink(name: string): Promise<string | null | undefined>;
+  getReleaseDate(name: string): Promise<string | null | undefined>;
 }
 
 // Configuration des APIs
@@ -49,3 +49,4 @@ export interface ApiConfig {
     baseUrl: string;
   };
 }
+
