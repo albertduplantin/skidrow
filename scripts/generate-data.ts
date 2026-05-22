@@ -124,7 +124,7 @@ async function scrapeAllPages(): Promise<Game[]> {
 
       try {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await page.waitForTimeout(1500);
+        await page.waitForTimeout(2000);
       } catch (err) {
         console.error(`Erreur navigation page ${currentPage}:`, err);
         break;
@@ -132,10 +132,22 @@ async function scrapeAllPages(): Promise<Game[]> {
 
       const html = await page.content();
       const $ = cheerio.load(html);
+
+      // Log le titre de la page pour détecter Cloudflare ou autres blocages
+      const pageTitle = $('title').text().trim();
+      console.log(`  → Titre: "${pageTitle}"`);
+
       const entries = extractGames($);
 
       if (entries.length === 0) {
-        console.log(`Aucun jeu trouvé sur la page ${currentPage}, arrêt.`);
+        if (currentPage === 1) {
+          // Sauvegarder le HTML pour debug si la première page ne retourne rien
+          const { writeFileSync } = await import('fs');
+          writeFileSync('debug-page1.html', html.slice(0, 10000));
+          console.error('⚠️  Page 1 : aucun jeu trouvé. HTML sauvegardé dans debug-page1.html');
+        } else {
+          console.log(`Aucun jeu trouvé sur la page ${currentPage}, arrêt.`);
+        }
         break;
       }
 
@@ -154,10 +166,16 @@ async function scrapeAllPages(): Promise<Game[]> {
         }
       }
 
-      console.log(`  → ${entries.length} entrées, ${allGames.length} jeux récents au total`);
+      console.log(`  → ${entries.length} entrées dont ${allGames.length} récentes au total`);
 
+      // Arrêter si on a trouvé des jeux récents ET qu'on commence à voir des vieux
       if (foundOld && allGames.length > 0) {
         console.log('Dates trop anciennes détectées, arrêt du scraping.');
+        break;
+      }
+      // Arrêter aussi si toute la page est trop ancienne (pas la peine de continuer)
+      if (foundOld && allGames.length === 0 && currentPage >= 3) {
+        console.log('Toutes les entrées sont trop anciennes, arrêt.');
         break;
       }
 
@@ -261,15 +279,17 @@ async function main() {
   console.log(`\n📊 ${games.length} jeux récupérés`);
 
   if (games.length === 0) {
-    console.error('❌ Aucun jeu trouvé. Vérifiez les sélecteurs CSS du scraper.');
-    process.exit(1);
+    console.warn('⚠️  Aucun jeu récent trouvé (scraping bloqué ou sélecteurs incorrects).');
+    console.warn('   Vérifiez debug-page1.html si présent, ou les sélecteurs CSS.');
   }
 
   // Enrichissement
   console.log('\n🔍 Enrichissement des données...');
   const enriched = await Promise.all(games.map(g => enrichGame(g, drivers)));
 
-  const filtered = enriched.filter(g => g.rating && g.rating >= MIN_RATING);
+  const filtered = enriched.length > 0
+    ? enriched.filter(g => g.rating && g.rating >= MIN_RATING)
+    : [];
 
   console.log(`\n✅ ${filtered.length} jeux avec note ≥ ${MIN_RATING}`);
 
