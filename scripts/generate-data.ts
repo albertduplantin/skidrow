@@ -142,7 +142,6 @@ async function scrapeAllPages(): Promise<Game[]> {
       if (entries.length === 0) {
         if (currentPage === 1) {
           // Sauvegarder le HTML pour debug si la première page ne retourne rien
-          const { writeFileSync } = await import('fs');
           writeFileSync('debug-page1.html', html.slice(0, 10000));
           console.error('⚠️  Page 1 : aucun jeu trouvé. HTML sauvegardé dans debug-page1.html');
         } else {
