@@ -2,6 +2,7 @@ import { MonthlyGames, MonthlyGamesSchema } from '@/types/game';
 import { notFound } from 'next/navigation';
 import fs from 'fs';
 import path from 'path';
+import RefreshButton from './RefreshButton';
 
 async function getMostRecentData(): Promise<MonthlyGames | null> {
   try {
@@ -155,11 +156,12 @@ export default async function HomePage() {
         )}
       </div>
 
-      <div className="text-center text-sm text-gray-500">
+      <div className="text-center text-sm text-gray-500 space-y-3">
         <p>
           Données mises à jour le {new Date(data.lastUpdated).toLocaleDateString('fr-FR')} à{' '}
           {new Date(data.lastUpdated).toLocaleTimeString('fr-FR')}
         </p>
+        <RefreshButton />
       </div>
     </div>
   );
