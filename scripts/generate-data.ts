@@ -183,19 +183,19 @@ async function enrichGame(
   calls.push(drivers.steam.getReleaseDate(game.name).then(v => ({ type: 'steamDate', value: v })).catch(() => ({ type: 'steamDate', value: null })));
 
   if (drivers.rawg) {
-    calls.push(drivers.rawg.getRating(game.name).then(v => ({ type: 'rawgRating', value: v })).catch(() => ({ type: 'rawgRating', value: null })));
-    calls.push(drivers.rawg.getSteamLink(game.name).then(v => ({ type: 'rawgSteam', value: v })).catch(() => ({ type: 'rawgSteam', value: null })));
-    calls.push(drivers.rawg.getReleaseDate(game.name).then(v => ({ type: 'rawgDate', value: v })).catch(() => ({ type: 'rawgDate', value: null })));
+    calls.push(drivers.rawg.getRating(game.name).then(v => ({ type: 'rawgRating', value: v ?? null })).catch(() => ({ type: 'rawgRating', value: null })));
+    calls.push(drivers.rawg.getSteamLink(game.name).then(v => ({ type: 'rawgSteam', value: v ?? null })).catch(() => ({ type: 'rawgSteam', value: null })));
+    calls.push(drivers.rawg.getReleaseDate(game.name).then(v => ({ type: 'rawgDate', value: v ?? null })).catch(() => ({ type: 'rawgDate', value: null })));
   }
   if (drivers.igdb) {
-    calls.push(drivers.igdb.getRating(game.name).then(v => ({ type: 'igdbRating', value: v })).catch(() => ({ type: 'igdbRating', value: null })));
-    calls.push(drivers.igdb.getSteamLink(game.name).then(v => ({ type: 'igdbSteam', value: v })).catch(() => ({ type: 'igdbSteam', value: null })));
-    calls.push(drivers.igdb.getReleaseDate(game.name).then(v => ({ type: 'igdbDate', value: v })).catch(() => ({ type: 'igdbDate', value: null })));
+    calls.push(drivers.igdb.getRating(game.name).then(v => ({ type: 'igdbRating', value: v ?? null })).catch(() => ({ type: 'igdbRating', value: null })));
+    calls.push(drivers.igdb.getSteamLink(game.name).then(v => ({ type: 'igdbSteam', value: v ?? null })).catch(() => ({ type: 'igdbSteam', value: null })));
+    calls.push(drivers.igdb.getReleaseDate(game.name).then(v => ({ type: 'igdbDate', value: v ?? null })).catch(() => ({ type: 'igdbDate', value: null })));
   }
   if (drivers.openCritic) {
-    calls.push(drivers.openCritic.getRating(game.name).then(v => ({ type: 'ocRating', value: v })).catch(() => ({ type: 'ocRating', value: null })));
-    calls.push(drivers.openCritic.getSteamLink(game.name).then(v => ({ type: 'ocSteam', value: v })).catch(() => ({ type: 'ocSteam', value: null })));
-    calls.push(drivers.openCritic.getReleaseDate(game.name).then(v => ({ type: 'ocDate', value: v })).catch(() => ({ type: 'ocDate', value: null })));
+    calls.push(drivers.openCritic.getRating(game.name).then(v => ({ type: 'ocRating', value: v ?? null })).catch(() => ({ type: 'ocRating', value: null })));
+    calls.push(drivers.openCritic.getSteamLink(game.name).then(v => ({ type: 'ocSteam', value: v ?? null })).catch(() => ({ type: 'ocSteam', value: null })));
+    calls.push(drivers.openCritic.getReleaseDate(game.name).then(v => ({ type: 'ocDate', value: v ?? null })).catch(() => ({ type: 'ocDate', value: null })));
   }
 
   const results = await Promise.all(calls);
