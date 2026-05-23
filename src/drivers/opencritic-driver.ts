@@ -18,6 +18,7 @@ export class OpenCriticDriver implements ApiDriver {
           'X-RapidAPI-Key': this.apiKey,
           'X-RapidAPI-Host': 'opencritic-api.p.rapidapi.com',
         },
+        timeout: 10000,
       });
 
       const game = response.data[0];
@@ -48,6 +49,7 @@ export class OpenCriticDriver implements ApiDriver {
           'X-RapidAPI-Key': this.apiKey,
           'X-RapidAPI-Host': 'opencritic-api.p.rapidapi.com',
         },
+        timeout: 10000,
       });
 
       const game = response.data[0];
@@ -70,6 +72,7 @@ export class OpenCriticDriver implements ApiDriver {
           'X-RapidAPI-Key': this.apiKey,
           'X-RapidAPI-Host': 'opencritic-api.p.rapidapi.com',
         },
+        timeout: 10000,
       });
 
       const game = response.data[0];

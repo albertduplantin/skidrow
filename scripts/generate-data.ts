@@ -10,7 +10,14 @@ import { SteamDriver } from '../src/drivers/steam-driver';
 
 const SKIDROW_BASE_URL = 'https://www.skidrowreloaded.com';
 const MIN_RATING = 80;
-const MAX_PAGES = 50;
+const MAX_PAGES = 15;
+const SCRIPT_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes max
+
+// Quitter automatiquement si le script tourne trop longtemps
+const scriptTimer = setTimeout(() => {
+  console.error('⏱️ Timeout : le script a dépassé 30 minutes, arrêt forcé.');
+  process.exit(1);
+}, SCRIPT_TIMEOUT_MS);
 
 function cleanGameName(name: string): string {
   return name
@@ -282,9 +289,12 @@ async function main() {
     console.warn('   Vérifiez debug-page1.html si présent, ou les sélecteurs CSS.');
   }
 
-  // Enrichissement
+  // Enrichissement séquentiel (évite de bloquer sur des requêtes parallèles sans timeout)
   console.log('\n🔍 Enrichissement des données...');
-  const enriched = await Promise.all(games.map(g => enrichGame(g, drivers)));
+  const enriched: Game[] = [];
+  for (const g of games) {
+    enriched.push(await enrichGame(g, drivers));
+  }
 
   const filtered = enriched.length > 0
     ? enriched.filter(g => g.rating && g.rating >= MIN_RATING)
@@ -308,6 +318,7 @@ async function main() {
   const outputPath = join(dataDir, `${month}.json`);
   writeFileSync(outputPath, JSON.stringify(validatedData, null, 2));
 
+  clearTimeout(scriptTimer);
   console.log(`\n💾 Données sauvegardées dans ${outputPath}`);
   console.log('🎉 Génération terminée !');
 }

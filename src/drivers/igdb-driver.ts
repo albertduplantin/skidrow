@@ -22,7 +22,7 @@ export class IgdbDriver implements ApiDriver {
         client_id: this.clientId,
         client_secret: this.clientSecret,
         grant_type: 'client_credentials',
-      });
+      }, { timeout: 10000 });
 
       this.accessToken = response.data.access_token;
       this.tokenExpiry = Date.now() + (response.data.expires_in * 1000) - 60000; // Expire 1 min avant
@@ -38,7 +38,7 @@ export class IgdbDriver implements ApiDriver {
     try {
       const token = await this.getAccessToken();
       
-      const response = await axios.post('https://api.igdb.com/v4/games', 
+      const response = await axios.post('https://api.igdb.com/v4/games',
         `search "${name}"; fields name,rating,rating_count; limit 1;`,
         {
           headers: {
@@ -46,6 +46,7 @@ export class IgdbDriver implements ApiDriver {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'text/plain',
           },
+          timeout: 10000,
         }
       );
 
@@ -65,7 +66,7 @@ export class IgdbDriver implements ApiDriver {
     try {
       const token = await this.getAccessToken();
       
-      const response = await axios.post('https://api.igdb.com/v4/games', 
+      const response = await axios.post('https://api.igdb.com/v4/games',
         `search "${name}"; fields name,external_games; limit 1;`,
         {
           headers: {
@@ -73,6 +74,7 @@ export class IgdbDriver implements ApiDriver {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'text/plain',
           },
+          timeout: 10000,
         }
       );
 
@@ -96,7 +98,7 @@ export class IgdbDriver implements ApiDriver {
     try {
       const token = await this.getAccessToken();
       
-      const response = await axios.post('https://api.igdb.com/v4/games', 
+      const response = await axios.post('https://api.igdb.com/v4/games',
         `search "${name}"; fields name,first_release_date; limit 1;`,
         {
           headers: {
@@ -104,6 +106,7 @@ export class IgdbDriver implements ApiDriver {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'text/plain',
           },
+          timeout: 10000,
         }
       );
 

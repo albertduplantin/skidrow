@@ -18,6 +18,7 @@ export class RawgDriver implements ApiDriver {
           search: name,
           page_size: 1,
         },
+        timeout: 10000,
       });
 
       const game = response.data.results[0];
@@ -40,6 +41,7 @@ export class RawgDriver implements ApiDriver {
           search: name,
           page_size: 1,
         },
+        timeout: 10000,
       });
 
       const game = response.data.results[0];
@@ -67,6 +69,7 @@ export class RawgDriver implements ApiDriver {
           search: name,
           page_size: 1,
         },
+        timeout: 10000,
       });
 
       const game = response.data.results[0];
