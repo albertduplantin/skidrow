@@ -6,6 +6,9 @@ on:
     - cron: '0 0 1 * *'
   workflow_dispatch: # Permettre l'exécution manuelle
 
+permissions:
+  contents: write
+
 jobs:
   generate-data:
     runs-on: ubuntu-latest
@@ -68,7 +71,15 @@ jobs:
           ls -la public/data/
           echo "Contenu du fichier le plus récent:"
           ls -t public/data/*.json | head -1 | xargs cat | head -20
-          
+
+      - name: Upload debug HTML (si scraping vide)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-html
+          path: debug-page1.html
+          if-no-files-found: ignore
+
       - name: Commit et push des données
         run: |
           git config --local user.email "action@github.com"

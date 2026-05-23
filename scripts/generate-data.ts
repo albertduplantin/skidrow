@@ -148,9 +148,16 @@ async function scrapeAllPages(): Promise<Game[]> {
 
       if (entries.length === 0) {
         if (currentPage === 1) {
-          // Sauvegarder le HTML pour debug si la première page ne retourne rien
-          writeFileSync('debug-page1.html', html.slice(0, 10000));
+          writeFileSync('debug-page1.html', html.slice(0, 50000));
           console.error('⚠️  Page 1 : aucun jeu trouvé. HTML sauvegardé dans debug-page1.html');
+          // Log la structure de la page pour diagnostiquer les sélecteurs
+          console.log('--- Structure détectée ---');
+          console.log('article:', $('article').length, ' | .post:', $('.post').length, ' | .entry:', $('.entry').length, ' | .item:', $('.item').length);
+          console.log('li:', $('li').length, ' | .post-item:', $('.post-item').length, ' | [class*=post]:', $('[class*="post"]').length);
+          console.log('h2 a (5 premiers):', $('h2 a').slice(0, 5).map((_, el) => $(el).text().trim()).get().join(' | '));
+          console.log('time:', $('time').length, ' | .date:', $('.date').length, ' | .entry-date:', $('.entry-date').length);
+          const firstLinks = $('a[href*="skidrow"]').slice(0, 5).map((_, el) => `${$(el).text().trim().slice(0, 40)} → ${$(el).attr('href')}`).get();
+          console.log('Liens skidrow (5 premiers):', firstLinks.join('\n  '));
         } else {
           console.log(`Aucun jeu trouvé sur la page ${currentPage}, arrêt.`);
         }
