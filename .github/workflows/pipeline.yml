@@ -35,13 +35,28 @@ jobs:
         run: |
           echo "Variables d'environnement configurées"
           
+      - name: Diagnostic pré-exécution
+        run: |
+          echo "=== Node version ==="
+          node --version
+          echo "=== tsx version ==="
+          npx tsx --version
+          echo "=== Test import playwright ==="
+          node -e "const {chromium} = require('playwright'); console.log('playwright OK')" || echo "playwright MANQUANT"
+          echo "=== Test import cheerio ==="
+          node -e "require('cheerio'); console.log('cheerio OK')" || echo "cheerio MANQUANT"
+          echo "=== Fichiers scripts ==="
+          ls -la scripts/
+          echo "=== Début du script (5 premières lignes) ==="
+          head -10 scripts/generate-data.ts
+
       - name: Génération des données
         env:
           RAWG_API_KEY: ${{ secrets.RAWG_API_KEY }}
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
           OPENCRITIC_API_KEY: ${{ secrets.OPENCRITIC_API_KEY }}
-        run: npm run generate-data
+        run: npm run generate-data 2>&1; echo "Exit code: $?"
         
       - name: Vérification des fichiers générés
         run: |
