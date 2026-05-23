@@ -42,7 +42,7 @@ jobs:
           echo "=== tsx version ==="
           npx tsx --version
           echo "=== Playwright chromium path ==="
-          node -e "try { const {chromium}=require('playwright'); const p=chromium.executablePath(); const {existsSync}=require('fs'); console.log('Path:', p, '| Exists:', existsSync(p)); } catch(e) { console.error('ERR:', e.message); }"
+          node -e 'try{var c=require("playwright").chromium;var p=c.executablePath();var e=require("fs").existsSync(p);console.log("path:",p,"exists:",e)}catch(ex){console.error("ERR:",ex.message)}'
           echo "=== Test import cheerio ==="
           node -e "require('cheerio'); console.log('cheerio OK')" || echo "cheerio MANQUANT"
           echo "=== Test tsx script (5s max) ==="
