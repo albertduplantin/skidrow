@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { ApiDriver } from '@/types/game';
+import { ApiDriver } from '../types/game';
 
 export class IgdbDriver implements ApiDriver {
   private clientId: string;

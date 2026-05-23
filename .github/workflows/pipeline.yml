@@ -41,14 +41,13 @@ jobs:
           node --version
           echo "=== tsx version ==="
           npx tsx --version
-          echo "=== Test import playwright ==="
-          node -e "const {chromium} = require('playwright'); console.log('playwright OK')" || echo "playwright MANQUANT"
+          echo "=== Playwright chromium path ==="
+          node -e "try { const {chromium}=require('playwright'); const p=chromium.executablePath(); const {existsSync}=require('fs'); console.log('Path:', p, '| Exists:', existsSync(p)); } catch(e) { console.error('ERR:', e.message); }"
           echo "=== Test import cheerio ==="
           node -e "require('cheerio'); console.log('cheerio OK')" || echo "cheerio MANQUANT"
-          echo "=== Fichiers scripts ==="
-          ls -la scripts/
-          echo "=== Début du script (5 premières lignes) ==="
-          head -10 scripts/generate-data.ts
+          echo "=== Test tsx script (5s max) ==="
+          timeout 5 npx tsx scripts/generate-data.ts 2>&1 | head -40 || true
+          echo "=== Fin diagnostic ==="
 
       - name: Génération des données
         env:
@@ -56,7 +55,13 @@ jobs:
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
           OPENCRITIC_API_KEY: ${{ secrets.OPENCRITIC_API_KEY }}
-        run: npm run generate-data 2>&1; echo "Exit code: $?"
+        run: |
+          set +e
+          npm run generate-data 2>&1
+          EXIT_CODE=$?
+          set -e
+          echo "=== Exit code: $EXIT_CODE ==="
+          exit $EXIT_CODE
         
       - name: Vérification des fichiers générés
         run: |

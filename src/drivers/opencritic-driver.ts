@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { ApiDriver } from '@/types/game';
+import { ApiDriver } from '../types/game';
 
 export class OpenCriticDriver implements ApiDriver {
   private apiKey: string;
@@ -84,3 +84,4 @@ export class OpenCriticDriver implements ApiDriver {
     }
   }
 }
+

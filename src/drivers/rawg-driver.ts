@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { ApiDriver } from '@/types/game';
+import { ApiDriver } from '../types/game';
 
 export class RawgDriver implements ApiDriver {
   private apiKey: string;
@@ -81,3 +81,4 @@ export class RawgDriver implements ApiDriver {
     }
   }
 }
+
