@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { chromium } from 'playwright';
 import { Game, MonthlyGames, MonthlyGamesSchema } from '../src/types/game';
@@ -11,6 +11,7 @@ import { SteamDriver } from '../src/drivers/steam-driver';
 const SKIDROW_BASE_URL = 'https://www.skidrowreloaded.com';
 const MIN_RATING = 80;
 const MAX_PAGES = 15;
+const KEEP_DAYS = 60; // durée de conservation d'un jeu dans la liste
 const SCRIPT_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes max
 
 // Quitter automatiquement si le script tourne trop longtemps
@@ -18,6 +19,21 @@ const scriptTimer = setTimeout(() => {
   console.error('⏱️ Timeout : le script a dépassé 30 minutes, arrêt forcé.');
   process.exit(1);
 }, SCRIPT_TIMEOUT_MS);
+
+// Jeux déjà collectés lors des exécutions précédentes (le flux RSS ne contient
+// que les derniers articles : on accumule au fil des jours)
+function loadPreviousGames(dataDir: string): Game[] {
+  if (!existsSync(dataDir)) return [];
+  const files = readdirSync(dataDir).filter(f => /^\d{4}-\d{2}\.json$/.test(f)).sort().slice(-2);
+  const out: Game[] = [];
+  for (const f of files) {
+    try {
+      const parsed = MonthlyGamesSchema.parse(JSON.parse(readFileSync(join(dataDir, f), 'utf-8')));
+      out.push(...parsed.games);
+    } catch { /* fichier invalide ignoré */ }
+  }
+  return out;
+}
 
 function cleanGameName(name: string): string {
   return name
@@ -57,53 +73,73 @@ function parseDate(raw: string): string | null {
   return null;
 }
 
-function extractGames($: cheerio.CheerioAPI): Array<{ name: string; url: string; dateStr: string }> {
-  const results: Array<{ name: string; url: string; dateStr: string }> = [];
+// Extrait la date depuis une URL WordPress (/2026/05/23/ ou /2026/05/)
+function extractDateFromUrl(url: string): string | null {
+  const m = url.match(/\/(\d{4})\/(\d{2})(?:\/(\d{2}))?/);
+  if (!m) return null;
+  return `${m[1]}-${m[2]}-${m[3] ?? '01'}`;
+}
 
-  // Stratégies par ordre de priorité pour trouver les posts
-  const postSelectors = ['article', '.post', '.entry', '.item'];
-  const titleSelectors = ['.entry-title a', 'h2.title a', '.post-title a', 'h2 a', 'h1 a', '.title a'];
-  const dateSelectors = ['time[datetime]', '.entry-date', '.post-date', '.date', 'time', '.published'];
+// Scrape le flux RSS WordPress (données structurées, pas de CSS selector)
+async function scrapeViaRSS(page: import('playwright').Page): Promise<Game[]> {
+  const feedUrl = `${SKIDROW_BASE_URL}/feed/`;
+  console.log(`📡 RSS: ${feedUrl}`);
 
-  for (const postSel of postSelectors) {
-    const posts = $(postSel);
-    if (posts.length === 0) continue;
+  await page.goto(feedUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForTimeout(2000);
 
-    posts.each((_, el) => {
-      const $el = $(el);
+  const content = await page.content();
+  const $rss = cheerio.load(content, { xmlMode: true });
+  const items = $rss('item');
+  console.log(`  → ${items.length} items dans le flux RSS`);
 
-      let title = '';
-      let url = '';
-      for (const sel of titleSelectors) {
-        const found = $el.find(sel).first();
-        if (found.length) {
-          title = found.text().trim();
-          url = found.attr('href') || '';
-          if (title && url) break;
-        }
-      }
-
-      let dateStr = '';
-      for (const sel of dateSelectors) {
-        const found = $el.find(sel).first();
-        if (found.length) {
-          const raw = found.attr('datetime') || found.text();
-          const parsed = parseDate(raw);
-          if (parsed) { dateStr = parsed; break; }
-        }
-      }
-
-      if (title && url && dateStr) {
-        results.push({
-          name: cleanGameName(title),
-          url: url.startsWith('http') ? url : `${SKIDROW_BASE_URL}${url}`,
-          dateStr,
-        });
-      }
-    });
-
-    if (results.length > 0) break;
+  if (items.length === 0) {
+    writeFileSync('debug-rss.html', content.slice(0, 50000));
+    console.warn('⚠️  Flux RSS vide. debug-rss.html sauvegardé.');
+    return [];
   }
+
+  const games: Game[] = [];
+  items.each((_, el) => {
+    const $el = $rss(el);
+    const title = $el.find('title').first().text().trim();
+    const link = $el.find('link').first().text().trim() || $el.find('guid').first().text().trim();
+    const pubDate = $el.find('pubDate').first().text().trim();
+
+    if (!title || !link) return;
+
+    const dateStr = pubDate ? parseDate(pubDate) : extractDateFromUrl(link);
+    if (!dateStr || isTooOld(dateStr) || !isRecentEnough(dateStr)) return;
+
+    games.push({
+      name: cleanGameName(title),
+      skidrowUrl: link,
+      postedDate: dateStr,
+      lastUpdated: new Date().toISOString(),
+    });
+  });
+
+  return games;
+}
+
+// Fallback HTML : extrait les jeux depuis les liens dont l'URL contient une date WordPress
+function extractGamesFromLinks($: cheerio.CheerioAPI): Array<{ name: string; url: string; dateStr: string }> {
+  const results: Array<{ name: string; url: string; dateStr: string }> = [];
+  const seen = new Set<string>();
+
+  $(`a[href*="${SKIDROW_BASE_URL}/20"]`).each((_, el) => {
+    const $el = $(el);
+    const href = ($el.attr('href') || '').trim();
+    const text = $el.text().trim();
+
+    if (!href || !text || seen.has(href)) return;
+
+    const dateStr = extractDateFromUrl(href);
+    if (!dateStr) return;
+
+    seen.add(href);
+    results.push({ name: cleanGameName(text), url: href, dateStr });
+  });
 
   return results;
 }
@@ -117,10 +153,23 @@ async function scrapeAllPages(): Promise<Game[]> {
     },
   });
 
-  const allGames: Game[] = [];
-
   try {
     const page = await context.newPage();
+
+    // 1. Essai RSS (le plus fiable — données structurées WordPress)
+    try {
+      const rssGames = await scrapeViaRSS(page);
+      if (rssGames.length > 0) {
+        console.log(`✅ RSS: ${rssGames.length} jeux récents`);
+        return rssGames;
+      }
+    } catch (err) {
+      console.warn('⚠️  RSS échoué, passage au scraping HTML:', (err as Error).message);
+    }
+
+    // 2. Fallback HTML : extraction par URL WordPress datée
+    console.log('📄 Fallback HTML...');
+    const allGames: Game[] = [];
 
     for (let currentPage = 1; currentPage <= MAX_PAGES; currentPage++) {
       const url = currentPage === 1
@@ -140,65 +189,45 @@ async function scrapeAllPages(): Promise<Game[]> {
       const html = await page.content();
       const $ = cheerio.load(html);
 
-      // Log le titre de la page pour détecter Cloudflare ou autres blocages
       const pageTitle = $('title').text().trim();
       console.log(`  → Titre: "${pageTitle}"`);
 
-      const entries = extractGames($);
+      const entries = extractGamesFromLinks($);
+      console.log(`  → ${entries.length} liens datés trouvés`);
 
-      if (entries.length === 0) {
-        if (currentPage === 1) {
-          writeFileSync('debug-page1.html', html.slice(0, 50000));
-          console.error('⚠️  Page 1 : aucun jeu trouvé. HTML sauvegardé dans debug-page1.html');
-          // Log la structure de la page pour diagnostiquer les sélecteurs
-          console.log('--- Structure détectée ---');
-          console.log('article:', $('article').length, ' | .post:', $('.post').length, ' | .entry:', $('.entry').length, ' | .item:', $('.item').length);
-          console.log('li:', $('li').length, ' | .post-item:', $('.post-item').length, ' | [class*=post]:', $('[class*="post"]').length);
-          console.log('h2 a (5 premiers):', $('h2 a').slice(0, 5).map((_, el) => $(el).text().trim()).get().join(' | '));
-          console.log('time:', $('time').length, ' | .date:', $('.date').length, ' | .entry-date:', $('.entry-date').length);
-          const firstLinks = $('a[href*="skidrow"]').slice(0, 5).map((_, el) => `${$(el).text().trim().slice(0, 40)} → ${$(el).attr('href')}`).get();
-          console.log('Liens skidrow (5 premiers):', firstLinks.join('\n  '));
-        } else {
-          console.log(`Aucun jeu trouvé sur la page ${currentPage}, arrêt.`);
-        }
+      if (entries.length === 0 && currentPage === 1) {
+        writeFileSync('debug-page1.html', html.slice(0, 100000));
+        console.error('⚠️  Page 1 : aucun lien daté. debug-page1.html sauvegardé.');
+        // Diagnostic : montrer les liens skidrow disponibles
+        const sample = $('a[href*="skidrowreloaded"]').slice(0, 10)
+          .map((_, el) => `${$(el).text().trim().slice(0, 50)} → ${$(el).attr('href')}`).get();
+        console.log('Liens skidrow (10 premiers):\n ', sample.join('\n  '));
         break;
       }
 
       let foundOld = false;
       for (const entry of entries) {
-        if (isTooOld(entry.dateStr)) {
-          foundOld = true;
-          continue;
-        }
+        if (isTooOld(entry.dateStr)) { foundOld = true; continue; }
         if (isRecentEnough(entry.dateStr)) {
-          allGames.push({
-            name: entry.name,
-            skidrowUrl: entry.url,
-            lastUpdated: new Date().toISOString(),
-          });
+          allGames.push({ name: entry.name, skidrowUrl: entry.url, postedDate: entry.dateStr, lastUpdated: new Date().toISOString() });
         }
       }
 
-      console.log(`  → ${entries.length} entrées dont ${allGames.length} récentes au total`);
+      console.log(`  → ${allGames.length} jeux récents au total`);
 
-      // Arrêter si on a trouvé des jeux récents ET qu'on commence à voir des vieux
       if (foundOld && allGames.length > 0) {
-        console.log('Dates trop anciennes détectées, arrêt du scraping.');
+        console.log('Dates trop anciennes détectées, arrêt.');
         break;
       }
-      // Arrêter aussi si toute la page est trop ancienne (pas la peine de continuer)
-      if (foundOld && allGames.length === 0 && currentPage >= 3) {
-        console.log('Toutes les entrées sont trop anciennes, arrêt.');
-        break;
-      }
+      if (entries.length === 0) break;
 
       await page.waitForTimeout(1000);
     }
+
+    return allGames;
   } finally {
     await browser.close();
   }
-
-  return allGames;
 }
 
 async function enrichGame(
@@ -208,10 +237,22 @@ async function enrichGame(
   console.log(`  🔍 ${game.name}`);
   const calls: Promise<{ type: string; value: string | number | null }>[] = [];
 
-  // Steam en premier — aucune clé requise
-  calls.push(drivers.steam.getRating(game.name).then(v => ({ type: 'steamRating', value: v })).catch(() => ({ type: 'steamRating', value: null })));
-  calls.push(drivers.steam.getSteamLink(game.name).then(v => ({ type: 'steamLink', value: v })).catch(() => ({ type: 'steamLink', value: null })));
-  calls.push(drivers.steam.getReleaseDate(game.name).then(v => ({ type: 'steamDate', value: v })).catch(() => ({ type: 'steamDate', value: null })));
+  // Steam en premier — aucune clé requise (une seule recherche, résultat mis en cache)
+  const steam = await drivers.steam.getDetails(game.name).catch(() => null);
+  game.rating = undefined;
+  if (steam) {
+    game.steamLink = steam.link;
+    game.steamAppId = steam.appId;
+    if (steam.releaseDate) game.releaseDate = steam.releaseDate;
+    if (steam.metascore !== undefined) game.metacriticScore = steam.metascore;
+    if (steam.percentPositive !== undefined) {
+      game.steamPercent = steam.percentPositive;
+      game.steamReviewCount = steam.reviewCount;
+      game.steamReviewLabel = steam.reviewLabel;
+    }
+    const steamRating = steam.metascore ?? steam.percentPositive;
+    if (steamRating !== undefined) calls.push(Promise.resolve({ type: 'steamRating', value: steamRating }));
+  }
 
   if (drivers.rawg) {
     calls.push(drivers.rawg.getRating(game.name).then(v => ({ type: 'rawgRating', value: v ?? null })).catch(() => ({ type: 'rawgRating', value: null })));
@@ -296,16 +337,25 @@ async function main() {
     console.warn('   Vérifiez debug-page1.html si présent, ou les sélecteurs CSS.');
   }
 
+  const dataDir = join(process.cwd(), 'public', 'data');
+  const previous = loadPreviousGames(dataDir);
+  console.log(`📚 ${previous.length} jeux déjà connus`);
+
   // Enrichissement séquentiel (évite de bloquer sur des requêtes parallèles sans timeout)
   console.log('\n🔍 Enrichissement des données...');
-  const enriched: Game[] = [];
+  const merged = new Map<string, Game>();
+  for (const g of previous) merged.set(g.skidrowUrl, g);
   for (const g of games) {
-    enriched.push(await enrichGame(g, drivers));
+    // Les nouveaux articles écrasent les anciens, les notes sont recalculées
+    merged.set(g.skidrowUrl, await enrichGame({ ...merged.get(g.skidrowUrl), ...g }, drivers));
   }
 
-  const filtered = enriched.length > 0
-    ? enriched.filter(g => g.rating && g.rating >= MIN_RATING)
-    : [];
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - KEEP_DAYS);
+  const filtered = Array.from(merged.values())
+    .filter(g => g.rating && g.rating >= MIN_RATING)
+    .filter(g => !g.postedDate || new Date(g.postedDate) >= cutoff)
+    .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
 
   console.log(`\n✅ ${filtered.length} jeux avec note ≥ ${MIN_RATING}`);
 
@@ -319,7 +369,6 @@ async function main() {
 
   const validatedData = MonthlyGamesSchema.parse(monthlyGames);
 
-  const dataDir = join(process.cwd(), 'public', 'data');
   if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 
   const outputPath = join(dataDir, `${month}.json`);

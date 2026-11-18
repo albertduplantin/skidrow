@@ -2,8 +2,8 @@ name: Pipeline de données mensuel
 
 on:
   schedule:
-    # Exécuter le 1er du mois à minuit UTC
-    - cron: '0 0 1 * *'
+    # Exécuter tous les jours à 06:00 UTC
+    - cron: '0 6 * * *'
   workflow_dispatch: # Permettre l'exécution manuelle
 
 permissions:
@@ -77,7 +77,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: debug-html
-          path: debug-page1.html
+          path: |
+            debug-page1.html
+            debug-rss.html
           if-no-files-found: ignore
 
       - name: Commit et push des données

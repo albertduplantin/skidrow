@@ -47,29 +47,61 @@ function GameCard({ game }: { game: MonthlyGames['games'][0] }) {
         )}
       </div>
       
-      <div className="space-y-2 text-sm text-gray-600">
+      <div className="space-y-3 text-sm text-gray-600">
         {game.releaseDate && (
           <div>
             <span className="font-medium">Date de sortie:</span> {new Date(game.releaseDate).toLocaleDateString('fr-FR')}
           </div>
         )}
-        
-        <div className="flex space-x-4">
-          <a
-            href={game.skidrowUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800 underline"
-          >
-            🔗 Skidrow
-          </a>
-          
+
+        <details className="group rounded border border-gray-200 bg-gray-50 px-3 py-2">
+          <summary className="cursor-pointer font-medium text-gray-800 select-none">
+            📊 Voir les notes
+          </summary>
+          <ul className="mt-2 space-y-1">
+            {game.steamPercent !== undefined && (
+              <li>
+                Steam : <strong>{game.steamPercent}%</strong> d&apos;avis positifs
+                {game.steamReviewLabel && <> ({game.steamReviewLabel}</>}
+                {game.steamReviewCount !== undefined && <>, {game.steamReviewCount.toLocaleString('fr-FR')} avis</>}
+                {game.steamReviewLabel && <>)</>}
+              </li>
+            )}
+            {game.metacriticScore !== undefined && (
+              <li>Metacritic : <strong>{game.metacriticScore}/100</strong></li>
+            )}
+            {game.openCriticScore !== undefined && (
+              <li>OpenCritic : <strong>{game.openCriticScore}/100</strong></li>
+            )}
+            <li>Note retenue (moyenne des sources) : <strong>{game.rating}/100</strong></li>
+          </ul>
           {game.steamLink && (
             <a
               href={game.steamLink}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-green-600 hover:text-green-800 underline"
+              className="mt-2 inline-block text-green-700 hover:text-green-900 underline"
+            >
+              Ouvrir la page Steam ↗
+            </a>
+          )}
+        </details>
+
+        <div className="flex flex-wrap gap-3">
+          <a
+            href={game.skidrowUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center rounded bg-blue-600 px-3 py-1.5 text-white hover:bg-blue-700"
+          >
+            ⬇️ Page de téléchargement
+          </a>
+          {game.steamLink && (
+            <a
+              href={game.steamLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center rounded border border-green-600 px-3 py-1.5 text-green-700 hover:bg-green-50"
             >
               🎮 Steam
             </a>
@@ -125,7 +157,7 @@ export default async function HomePage() {
     <div className="space-y-6">
       <div className="text-center">
         <h2 className="text-3xl font-bold text-gray-900 mb-2">
-          Jeux de qualité — {data.month}
+          Meilleurs jeux récents
         </h2>
         <p className="text-lg text-gray-600">
                      Découvrez les meilleurs jeux avec une note d&apos;au moins 80/100
